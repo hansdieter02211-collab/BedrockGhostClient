@@ -1,60 +1,43 @@
 #include <Windows.h>
 #include <thread>
-#include "Vec3.h"
+#include "aimassist.h"
+#include "gui.h"
 
-// Stubs für Speicher-Adressen → DU MUSST DIESE FINDEN
-uintptr_t baseAddress = (uintptr_t)GetModuleHandle(NULL);
-uintptr_t localPlayerPtr = 0x12345678;  // Beispieladresse – anpassen!
-uintptr_t entityListPtr = 0x87654321;   // Beispieladresse – anpassen!
+// ImGui includes (angepasst auf dein Projekt!)
+#include "imgui.h"
+#include "imgui_impl_win32.h"
+#include "imgui_impl_dx11.h"
 
-// Lies Daten aus dem Spielspeicher (direkt, da internal)
-template<typename T>
-T Read(uintptr_t address) {
-    return *(T*)address;
+#include <d3d11.h>
+#pragma comment(lib, "d3d11.lib")
+
+bool g_ShowMenu = true;
+
+HWND GetGameWindow() {
+    return FindWindowW(NULL, L"Minecraft");
 }
 
-template<typename T>
-void Write(uintptr_t address, T value) {
-    *(T*)address = value;
-}
-
-void AimAssistMain() {
+void AimAssistThread() {
     while (true) {
-        if (GetAsyncKeyState(VK_LBUTTON) & 1) {
-            // Lies LocalPlayer Daten
-            Player player;
-            player.position = Read<Vec3>(localPlayerPtr + 0x10);  // Beispieloffset
-            player.yaw = Read<float>(localPlayerPtr + 0x20);       // Beispieloffset
-            player.pitch = Read<float>(localPlayerPtr + 0x24);     // Beispieloffset
+        if (g_AimAssistEnabled && (GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+            // Placeholder für LocalPlayer + EntityList
+            Player player = { {0,0,0}, 0.0f, 0.0f };
+            std::vector<Entity*> dummyEntities;
 
-            // Lies EntityList
-            std::vector<Entity*> entities;
-            for (int i = 0; i < 64; i++) {
-                uintptr_t entityBase = Read<uintptr_t>(entityListPtr + i * 0x8);
-                if (!entityBase) continue;
+            // Dummy Gegner in der Nähe
+            Entity* e = new Entity{ {5,0,5}, true, true };
+            dummyEntities.push_back(e);
 
-                Entity* e = new Entity();
-                e->position = Read<Vec3>(entityBase + 0x10);  // Beispieloffset
-                e->isAlive = Read<bool>(entityBase + 0x30);
-                e->isEnemy = Read<bool>(entityBase + 0x34);
-                entities.push_back(e);
-            }
-
-            // Ziel finden
-            Entity* target = GetClosestTarget(player, entities, 30.0f); // FOV
-
+            Entity* target = GetClosestTarget(player, dummyEntities, 30.0f);
             if (target) {
-                Vec3 targetAngles = CalcAngle(player.position, target->position);
-                SmoothAim(player, targetAngles, 6.0f); // Smoothing
+                Vec3 angle = CalcAngle(player.position, target->position);
+                SmoothAim(player, angle, 6.0f);
 
-                // Schreibe neue Blickrichtung
-                Write<float>(localPlayerPtr + 0x20, player.yaw);
-                Write<float>(localPlayerPtr + 0x24, player.pitch);
+                // Hier: Schreibe `player.yaw` / `pitch` ins Spiel (wenn du echte Adressen hast)
             }
 
-            for (auto e : entities) delete e;
+            delete e;
         }
-
         Sleep(10);
     }
 }
@@ -62,17 +45,37 @@ void AimAssistMain() {
 DWORD WINAPI MainThread(HMODULE hModule) {
     AllocConsole();
     freopen("CONOUT$", "w", stdout);
-    std::cout << "[+] AimAssist injected.\n";
+    std::cout << "[+] Injected\n";
 
-    std::thread(AimAssistMain).detach();
+    HWND hwnd = GetGameWindow();
+    if (!hwnd) {
+        std::cout << "[!] Fenster nicht gefunden\n";
+        return 0;
+    }
 
+    // DirectX + ImGui Initialisieren (Dummy – muss angepasst werden an Spielrendering)
+    // Hier wäre normalerweise Hooking auf Present oder ähnliches nötig.
+
+    std::thread(AimAssistThread).detach();
+
+    while (true) {
+        if (GetAsyncKeyState(VK_F6) & 1)
+            g_ShowMenu = !g_ShowMenu;
+
+        if (GetAsyncKeyState(VK_END) & 1)
+            break;
+
+        Sleep(100);
+    }
+
+    FreeLibraryAndExitThread(hModule, 0);
     return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
-        CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)MainThread, hModule, 0, nullptr);
+        CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)MainThread, hModule, 0, NULL);
     }
     return TRUE;
 }
